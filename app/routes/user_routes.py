@@ -26,9 +26,6 @@ email_regex = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
 # Regular expression for password validation
 password_regex = r'^(?=.*[A-Z])(?=.*[!@#$%^&*])[A-Za-z\d!@#$%^&*]{8,}$'
 
-# Regular expression for phone number validation
-phone_regex = r"^959\d{7,9}$"
-
 def middleware(f):
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -106,7 +103,6 @@ def login():
         responseUserObject = {
             "name": user.get('name'),
             "email": user.get('email'),
-            "phone": user.get('phone'),
         }
 
 
@@ -214,7 +210,7 @@ def verify_recaptcha():
             responseUserObject = {
                 "name": cachedUser.get('name'),
                 "email": cachedUser.get('email'),
-                "phone": cachedUser.get('phone') if cachedUser.get('phone') else "",
+                "login": login
             }
             return jsonify({"statuscode": 200, "message": "Recaptcha verified successfully", "user": responseUserObject}), 200
 
@@ -281,7 +277,7 @@ def verify_email():
         
         if login and login == True:
             access_token = generate_jwt(email, datetime.utcnow() + timedelta(minutes=1))
-            refresh_token = generate_jwt(email, datetime.utcnow() + timedelta(days=7))
+            refresh_token = generate_jwt(email, datetime.utcnow() + timedelta(minutes=3))
 
             r.set(email, refresh_token)
             return jsonify({"statuscode": 200, "message": "Email verified successfully.", "access_token": access_token, "refresh_token": refresh_token}), 200
@@ -292,108 +288,6 @@ def verify_email():
     except Exception as e:
         return jsonify({"message": str(e)}), 500
 
-
-@user_blueprint.route('/add_phone', methods=['POST'])
-def add_phone_number():
-    try:
-        data = request.get_json()
-        email = data.get('email')
-        phone = data.get('phone')
-
-        if not email or not phone:
-            return jsonify({"statuscode": 400, "message": "Phone number required."}), 200
-
-        if not re.match(phone_regex, phone):
-            return jsonify({"statuscode": 400,"message": "Invalid phone number."}), 200
-
-        user_ref = db.collection("users")
-        query = user_ref.where(filter=FieldFilter("email", "==", email)).limit(1)
-
-        results = query.stream()
-
-        current = None
-        for doc in results:
-            current = doc.to_dict()
-            break
-
-        if not current:
-            return jsonify({"statuscode": 400,"message": "User not found."}), 200
-
-        user_ref.document(email).update({"phone": phone})
-        
-        otp = generate_otp()
-        print("OTP:", otp)
-        cache.set(email + "_otp", otp, timeout=300)
-        # send_sms(phone, otp)
-
-        return jsonify({"statuscode": 200, "message": "Phone Added."}), 200
-
-    except Exception as e:
-        return jsonify({"message": str(e)}), 500
-
-
-@user_blueprint.route('/resend_otp', methods=['POST'])
-def resend_otp():
-    try:
-        data = request.get_json()
-
-        email = data.get('email')
-        phone = data.get('phone')
-
-        if not email or not phone:
-            return jsonify({"statuscode": 400, "message": "Phone number required."}), 200
-        
-        user = None
-        users_ref = db.collection("users")
-        query = users_ref.where(filter=FieldFilter("email", "==", email)).where(filter=FieldFilter("phone", "==", phone)).limit(1)
-
-        results = query.stream()
-
-        for doc in results:
-            user = doc.to_dict()
-            break
-
-        if not user:
-            return jsonify({"statuscode": 400, "message": "User not found."}), 200
-
-        otp = generate_otp()
-        print("OTP:", otp)
-        cache.set("{email}_otp".format(email=email), otp, timeout=300)
-        # send_sms(phone, otp)
-
-        return jsonify({"statuscode": 200, "message": "OTP resent"}), 200
-
-    except Exception as e:
-        return jsonify({"message": str(e)}), 500
-
-@user_blueprint.route('/verify_otp', methods=['POST'])
-def verify_otp():
-    try:
-        data = request.get_json()
-
-        email = data.get('email')
-        otp = data.get('otp')
-
-        print(email, otp)
-
-        verify_key = "{email}_otp".format(email=email)
-        print(verify_key)
-        print(cache.get(verify_key))
-
-        print(otp == cache.get(verify_key))
-
-        if cache.get(verify_key) is None:
-            return jsonify({"statuscode": 400, "message": "Invalid OTP code"}), 200
-
-        if cache.get(verify_key) != otp:
-            return jsonify({"statuscode": 400, "message": "OTP code expired"}), 200
-
-        cache.delete(verify_key)
-
-        return jsonify({"statuscode": 200, "message": "Email verified successfully."}), 200
-    except Exception as e:
-        return jsonify({"message": str(e)}), 500
-    
 
 @user_blueprint.route('/change_password', methods=['POST'])
 @middleware
@@ -476,7 +370,7 @@ def refresh_token():
             return jsonify({"statuscode": 403, "message": "Forbidden"}), 200
 
         new_access_token = generate_jwt(user_id, datetime.utcnow() + timedelta(minutes=1))
-        new_refresh_token = generate_jwt(user_id, datetime.utcnow() + timedelta(days=7))
+        new_refresh_token = generate_jwt(user_id, datetime.utcnow() + timedelta(minutes=3))
 
         payload['exp'] = datetime.utcnow()
         r.set(user_id, new_refresh_token)
